@@ -8,7 +8,7 @@ from PIL import Image
 API_BASE = "http://127.0.0.1:8000" #local
 
 st.set_page_config(page_title="Linear Regression", layout="wide")
-st.title("Linear Regression (FastAPI)")
+st.title("Linear Regression")
 
 def b64_to_image(b64_str: str) -> Image.Image:
     return Image.open(BytesIO(base64.b64decode(b64_str)))
