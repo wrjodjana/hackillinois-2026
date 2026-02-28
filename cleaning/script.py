@@ -3,45 +3,61 @@ from google import genai
 import io
 import os
 import re
+import sys
 from dotenv import load_dotenv
 
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-df = pd.read_csv('smartwatch.csv')
-df
+input_path = sys.argv[1]
+output_path = sys.argv[2]
 
-description = df.describe()
-info = df.info()
-head = df.head(3)
+df = pd.read_csv(input_path)
 
 buffer = io.StringIO()
 df.info(buf=buffer)
 info_string = buffer.getvalue()
 
+head_string = df.head(10).to_string()
+describe_string = df.describe(include='all').to_string()
+
+sample_values = {}
+for col in df.columns:
+    sample_values[col] = [str(v) for v in df[col].dropna().unique()[:15]]
+sample_string = "\n".join(f"  {col}: {vals}" for col, vals in sample_values.items())
+
 prompt = f"""
 You are an expert Data Scientist acting as an autonomous data-cleaning agent.
-You must automatically fix issues in the dataset based strictly on the metadata below.
+You must automatically fix ALL data quality issues based on the metadata below.
 
 ### DATA CONTEXT ###
-1. Data Sample (df.head(3)):
-{head}
+1. Schema and Null Counts (df.info()):
+{info_string}
 
-2. Schema and Null Counts (df.info()):
-{info}
+2. Data Sample (df.head(10)):
+{head_string}
 
-3. Summary Statistics (df.describe()):
-{description}
+3. Summary Statistics (df.describe(include='all')):
+{describe_string}
+
+4. Unique sample values per column:
+{sample_string}
 
 ### YOUR OBJECTIVE ###
-Write a Python script that automatically handles missing values, incorrect types, and extreme outliers.
+Write a Python script that performs ALL of the following:
+1. Drop rows with missing/null values.
+2. Fix incorrect types — columns that should be numeric but contain invalid string entries should be converted using pd.to_numeric with errors='coerce' before dropping.
+3. Fix typos and inconsistencies in categorical/string columns — correct misspellings, standardize formatting like replacing underscores with spaces, and unify equivalent values.
+4. Remove extreme outliers that are clearly invalid based on the domain context of each column.
+5. Handle mixed-type columns where some values are numeric and others are strings — standardize them to one consistent type.
 
 ### STRICT CONSTRAINTS ###
-- Assume the data is already loaded into a variable named `df`.
-- Do not include `pd.read_csv()` in your code.
+- The data is already loaded in a variable called `df`. Do not include `pd.read_csv()`.
 - Only output one clean block of Python code enclosed in ```python tags.
-- Do not provide any conversational text or explanations. Just the code.
-- For missing values, drop the rows containing them. Do not impute or fill missing values.
+- No conversational text or explanations. Just the code.
+- NEVER use chained assignment like `df[col].fillna(x, inplace=True)`. Use `df[col] = df[col].method()` instead. This is pandas with Copy-on-Write.
+- When converting columns to numeric, use `pd.to_numeric(col, errors='coerce')`.
+- The code must modify and return the `df` variable.
 """
 
 client = genai.Client(api_key=GEMINI_API_KEY)
@@ -69,7 +85,7 @@ for attempt in range(MAX_RETRIES):
     try:
         exec(cleaning_code, {}, local_scope)
         df = local_scope['df']
-        df.to_csv('cleaned_smartwatch.csv', index=False)
+        df.to_csv(output_path, index=False)
         break
     except Exception as e:
         error_msg = traceback.format_exc()
