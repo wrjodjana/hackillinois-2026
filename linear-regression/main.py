@@ -33,7 +33,12 @@ async def upload_dataset(file: UploadFile = File(...)):
 
     df = pd.read_csv(path)
     cols = list(df.columns)
-    numeric_cols = [c for c in cols if pd.api.types.is_numeric_dtype(df[c])]
+    numeric_cols = []
+    for c in cols:
+        s = pd.to_numeric(df[c], errors="coerce")
+        # consider numeric if at least 90% of values can be parsed as numbers
+        if s.notna().mean() >= 0.9:
+            numeric_cols.append(c)
 
     return UploadResponse(
         dataset_id=dataset_id,
