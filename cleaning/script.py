@@ -4,6 +4,9 @@ import io
 import os
 import re
 import sys
+import json
+import numpy as np
+import traceback
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -11,6 +14,11 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 input_path = sys.argv[1]
 output_path = sys.argv[2]
+options = json.loads(sys.argv[3]) if len(sys.argv) > 3 else {
+    "missing": "drop",
+    "outliers": "remove",
+    "typos": "auto",
+}
 
 df = pd.read_csv(input_path)
 
@@ -26,9 +34,26 @@ for col in df.columns:
     sample_values[col] = [str(v) for v in df[col].dropna().unique()[:15]]
 sample_string = "\n".join(f"  {col}: {vals}" for col, vals in sample_values.items())
 
+if options["missing"] == "drop":
+    missing_instruction = "Drop rows with any remaining missing/null values. Do not impute or fill."
+else:
+    missing_instruction = "Impute missing values: fill numeric columns with the median, and categorical/string columns with the mode (most frequent value)."
+
+if options["outliers"] == "remove":
+    outlier_instruction = "Remove extreme outliers that are clearly invalid based on the domain context of each column."
+elif options["outliers"] == "cap":
+    outlier_instruction = "Cap (winsorize) extreme outliers by clipping numeric values to the 1st and 99th percentile bounds instead of removing them."
+else:
+    outlier_instruction = "Leave outliers as-is. Do not remove or modify any outliers."
+
+if options["typos"] == "auto":
+    typo_instruction = "Fix typos and inconsistencies in categorical/string columns — correct misspellings, standardize formatting like replacing underscores with spaces, and unify equivalent values."
+else:
+    typo_instruction = "Leave categorical/string values as-is. Do not correct typos or standardize formatting."
+
 prompt = f"""
 You are an expert Data Scientist acting as an autonomous data-cleaning agent.
-You must automatically fix ALL data quality issues based on the metadata below.
+You must fix data quality issues based on the metadata and objectives below.
 
 ### DATA CONTEXT ###
 1. Schema and Null Counts (df.info()):
@@ -45,11 +70,13 @@ You must automatically fix ALL data quality issues based on the metadata below.
 
 ### YOUR OBJECTIVE ###
 Write a Python script that performs ALL of the following:
-1. Drop rows with missing/null values.
-2. Fix incorrect types — columns that should be numeric but contain invalid string entries should be converted using pd.to_numeric with errors='coerce' before dropping.
-3. Fix typos and inconsistencies in categorical/string columns — correct misspellings, standardize formatting like replacing underscores with spaces, and unify equivalent values.
-4. Remove extreme outliers that are clearly invalid based on the domain context of each column.
-5. Handle mixed-type columns where some values are numeric and others are strings — standardize them to one consistent type.
+1. Fix incorrect types — columns that should be numeric but contain invalid string entries should be converted using pd.to_numeric with errors='coerce'.
+2. Handle mixed-type columns where some values are numeric and others are strings — standardize them to one consistent type.
+3. Drop exact duplicate rows.
+4. Drop any columns where more than 50% of the values are missing.
+5. {missing_instruction}
+6. {outlier_instruction}
+7. {typo_instruction}
 
 ### STRICT CONSTRAINTS ###
 - The data is already loaded in a variable called `df`. Do not include `pd.read_csv()`.
@@ -66,9 +93,6 @@ response = client.models.generate_content(
     model='gemini-2.5-flash',
     contents=prompt
 )
-
-import numpy as np
-import traceback
 
 MAX_RETRIES = 3
 conversation = [prompt]
@@ -97,7 +121,3 @@ for attempt in range(MAX_RETRIES):
             model='gemini-2.5-flash',
             contents="\n".join(conversation)
         )
-
-
-
-
