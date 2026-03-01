@@ -3,6 +3,7 @@ import pandas as pd
 import subprocess
 import os
 import json
+import sys
 
 st.set_page_config(page_title="Refine Loop App", layout="wide")
 st.title("Dataset Refinement App")
@@ -58,7 +59,7 @@ if uploaded:
             try:
                 result = subprocess.run(
                     [
-                        "python3",
+                        sys.executable,
                         SCRIPT_PATH,
                         input_path,
                         output_path,
@@ -102,6 +103,9 @@ if uploaded:
                     )
 
                     st.session_state["cleaned_df"] = cleaned
+                    st.divider()
+                    if st.button("Proceed to Linear Regression"):
+                        st.switch_page("pages/linreg.py")
                 else:
                     st.error("Cleaned file not found.")
 
